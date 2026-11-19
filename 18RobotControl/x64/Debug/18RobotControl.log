@@ -1,0 +1,30 @@
+﻿生成启动时间为 2026/11/19 8:58:19。
+     1>项目“D:\download\labcode\18RobotControlTest3-1\18RobotControl\18RobotControl.vcxproj”在节点 2 上(Build 个目标)。
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V140\Microsoft.CppBuild.targets(392,5): warning MSB8028: The intermediate directory (x64\Debug\) contains files shared from another project (18RobotControl-1.vcxproj).  This can lead to incorrect clean and rebuild behavior.
+     1>Link:
+         D:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\x86_amd64\link.exe /ERRORREPORT:PROMPT /OUT:"D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.exe" /INCREMENTAL /NOLOGO /LIBPATH:D:\download\opencv\build\x64\vc15\lib opencv_world460d.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /manifestinput:"D:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Include\Manifest\dpiaware.manifest" /Debug /PDB:"D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.pdb" /SUBSYSTEM:WINDOWS /TLBID:1 /ENTRY:"wWinMainCRTStartup" /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.lib" /MACHINE:X64 x64\Debug\18RobotControl.res
+         x64\Debug\18RobotControl.obj
+         x64\Debug\18RobotControlDlg.obj
+         x64\Debug\camera.obj
+         x64\Debug\file_utils.obj
+         x64\Debug\img_data.obj
+         x64\Debug\img_lines.obj
+         x64\Debug\img_process.obj
+         x64\Debug\img_roi.obj
+         x64\Debug\img_thinning.obj
+         x64\Debug\KalmanFilter.obj
+         x64\Debug\math_utils.obj
+         x64\Debug\Page1Dlg.obj
+         x64\Debug\Page2Dlg.obj
+         x64\Debug\Page3Dlg.obj
+         x64\Debug\particlefilter.obj
+         x64\Debug\robot.obj
+         x64\Debug\SerialPort.obj
+         x64\Debug\stdafx.obj
+         x64\Debug\task.obj
+         18RobotControl.vcxproj -> D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.exe
+     1>已完成生成项目“D:\download\labcode\18RobotControlTest3-1\18RobotControl\18RobotControl.vcxproj”(Build 个目标)的操作。
+
+已成功生成。
+
+已用时间 00:00:04.79

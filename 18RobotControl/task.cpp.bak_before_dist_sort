@@ -1,0 +1,264 @@
+#include "task.h"
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include "particlefilter.h"
+#include "KalmanFilter.h"
+
+using namespace cv;
+using namespace std;
+
+particlefilter tracker;
+
+// 重置视频处理状态：重新加载视频时从第一帧开始
+void ImgTask::Reset()
+{
+	m_count = 0;
+	m_countKF = 0;
+}
+
+// 从当前 long_lines 中寻找直线并分别计算交点（新规则）：
+//   两条近垂直线现在都在 88 度左右、角度相近，无法再靠角度区分，
+//   改为先找两条 87 度左右的直线，用到图像原点 (0,0) 的距离来区分：
+//     距离大的直线 与  75 度直线求交点（intersection）
+//     距离小的直线 与 -75 度直线求交点（intersection2）
+//   75 / -75 度直线的找法保持不变。
+bool ImgTask::findHoughIntersections(ImgData& data)
+{
+    img_lines lines;
+    data.intersection = Point2d();
+    data.intersection2 = Point2d();
+    data.vertical_line = Vec4i();
+    data.incline_line = Vec4i();
+    data.vertical_line2 = Vec4i();
+    data.incline_line2 = Vec4i();
+
+    // 1. 找两条 87 度左右的近垂直线
+    vector<Vec4i> nearVertical;
+    lines.findTargetLinesByAngle(data.long_lines, 87.0, nearVertical, 2);
+
+    // 2. 75 / -75 度直线：找法不变
+    const bool has75 = lines.findTargetLines(data.long_lines, 75.0, data.vertical_line);
+    const bool hasNeg75 = lines.findTargetLines(data.long_lines, -75.0, data.vertical_line2);
+
+    bool pair1 = false;
+    bool pair2 = false;
+    if (nearVertical.size() >= 2 && has75 && hasNeg75) {
+        // 3. 求两条近垂直线各自到图像原点的距离
+        Point origin(0, 0);
+        LineEquation eq0 = lines.getLineEquation(nearVertical[0]);
+        LineEquation eq1 = lines.getLineEquation(nearVertical[1]);
+        const double d0 = lines.pointToLineDistance(origin, eq0);
+        const double d1 = lines.pointToLineDistance(origin, eq1);
+
+        // 4. 距离大的配 75 度，距离小的配 -75 度
+        const Vec4i& farLine = (d0 >= d1) ? nearVertical[0] : nearVertical[1];
+        const Vec4i& nearLine = (d0 >= d1) ? nearVertical[1] : nearVertical[0];
+
+        data.incline_line = farLine;
+        pair1 = lines.calculateIntersectionHough(data.vertical_line, data.incline_line,
+            data.intersection, data.lineEquation_vertical, data.lineEquation_incline);
+
+        data.incline_line2 = nearLine;
+        pair2 = lines.calculateIntersectionHough(data.vertical_line2, data.incline_line2,
+            data.intersection2, data.lineEquation_vertical2, data.lineEquation_incline2);
+    }
+
+    return pair1 || pair2;
+}
+
+bool ImgTask::firstFrameProcess(ImgData& data)//处理彩色图像
+{
+    if (data.inputcolor.empty()) {
+        cerr << "No Image Input" << endl;
+        return false;
+    }
+    img_lines lines;
+    ImgProcess process;
+    process.preprocessImage(data);
+    lines.detectLongLines(data.skeleton, data.inputcolor, data.long_lines, 30, 30, 100);
+    findHoughIntersections(data);
+    lines.drawHoughPoint(data.inputcolor, data.intersection, data.vertical_line, data.incline_line, data.current_interPoint);
+	if (!data.current_interPoint.empty())
+	{
+		data.previous_interPoint.push_back(data.current_interPoint.front());//正常情况下，检测到交点后，current_interPoint有两个元素，第1个元素是上一帧交点
+	}
+    if (data.current_interPoint.size() < 1) {
+        return false;
+    }
+    else {
+        return true;
+    }
+}
+
+bool ImgTask::FrameProcess(ImgData& data) {
+    img_lines lines;
+    lines.detectLongLines(data.global_skeleton, data.inputcolor, data.long_lines, 10, 10, 50);
+    findHoughIntersections(data);
+    lines.drawHoughPoint(data.inputcolor, data.intersection, data.vertical_line, data.incline_line, data.current_interPoint);
+	if (!data.current_interPoint.empty())
+	{
+		data.previous_interPoint.push_back(data.current_interPoint.front());//正常情况下，检测到交点后，current_interPoint有两个元素，第1个元素是上一帧交点
+	}
+    if (data.current_interPoint.size() < 2) {
+        return false;
+    }
+    else {
+        return true;
+    }
+}
+
+void ImgTask::roiProcess(ImgData& data){
+    img_roi roi;
+    img_lines lines;
+    ImgProcess process;
+    // Guard: the ROI crop must be in-frame. On failure skip the local refine and
+    // record the current point so InterPointUpdate still sees a candidate and can
+    // fall back to the full-image Hough path.
+    bool roi_ok = !data.roi_region.empty()
+               && !data.current_interPoint.empty()
+               && !data.inputcolor.empty();
+    if (roi_ok) {
+        const cv::Rect rr = data.roi_region.back();
+        roi_ok = rr.x >= 0 && rr.y >= 0 && rr.width > 0 && rr.height > 0 &&
+                 rr.x + rr.width  <= data.inputcolor.cols &&
+                 rr.y + rr.height <= data.inputcolor.rows;
+    }
+    if (!roi_ok) {
+        if (!data.current_interPoint.empty()) {
+            data.previous_interPoint.push_back(data.current_interPoint.front());
+        }
+        return;
+    }
+    cout << "roi" << data.roi_region.back() << endl;
+    data.input_roicolor = data.inputcolor(data.roi_region.back());
+    process.roipreprocessImage(data);
+    // ROI 骨架同样用于检测第二组直线（86 度与 -75 度），计算第二个交点
+    lines.detectLongLines(data.global_skeleton, data.inputcolor, data.long_lines, 10, 10, 50);
+    findHoughIntersections(data);
+    const bool masks_ok = roi.createRoiMasks(data.inputcolor, data.global_skeleton,
+                       data.current_interPoint.back().y - 150, data.current_interPoint.back().y - 5,
+                       data.current_interPoint.back().y + 5, data.current_interPoint.back().y + 150,
+                       data.current_interPoint.back().x - 10, data.current_interPoint.back().x + 10,
+                       data.current_interPoint.back().x + 5, data.current_interPoint.back().x +25,
+                       data.upper_mask, data.lower_mask,
+                       data.upper_roi, data.lower_roi);
+    if (!masks_ok) {
+        if (!data.current_interPoint.empty()) {
+            data.previous_interPoint.push_back(data.current_interPoint.front());
+        }
+        return;
+    }
+    lines.RANSAC_fitLine(data.upper_roi, data.upper_line);
+    lines.RANSAC_fitLine(data.lower_roi, data.lower_line);
+    lines.calculateIntersectionFitline(data.upper_line, data.lower_line, data.intersection, data.lineEquation_vertical, data.lineEquation_incline);
+    lines.drawFitlinePoint(data.inputcolor, data.intersection, data.upper_line, data.lower_line, data.current_interPoint);
+    data.previous_interPoint.push_back(data.current_interPoint.front());//正常情况下，检测到交点后，current_interPoint有两个元素，第1个元素是上一帧交点
+}
+
+void ImgTask::InterPointUpdate(ImgData& data) {
+    // Guard: both vectors must be non-empty. On a frame where no candidate was
+    // produced there is nothing to update, so leave the state as it is.
+    if (data.current_interPoint.empty()) {
+        data.previous_interPoint.clear();
+        return;
+    }
+    Point2d curr_temp = data.current_interPoint.back();
+    if (data.previous_interPoint.empty()) {
+        data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end() - 1);
+        data.previous_interPoint.clear();
+        return;
+    }
+    Point2d pre_temp = data.previous_interPoint.back();
+    if (data.current_interPoint.size() < 2) {//roi区域没有找到交点
+        if (FrameProcess(data)) {//使用Hough方法找到了，更新交点。删除点，保留最新的点
+            data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end() - 1);//保留最新的点
+        }
+        else {
+            data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end());
+            data.current_interPoint.push_back(data.previous_interPoint.back());//使用上一帧的交点
+        }
+    }
+    else if (curr_temp.x <= 0 ||curr_temp.y <= 0 || curr_temp.x >= data.inputcolor.cols || curr_temp.y >= data.inputcolor.rows){ //检查交点是否在图像区域内
+        if (FrameProcess(data)) {//使用Hough方法找到了，更新交点。删除点，保留最新的点
+            data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end() - 1);//保留最新的点
+        }
+        else {
+            data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end());
+            data.current_interPoint.push_back(data.previous_interPoint.back());//使用上一帧的交点
+        }
+    }
+    else if (norm(curr_temp - pre_temp) > 20) {
+        if (FrameProcess(data)) {//使用Hough方法找到了，更新交点。删除点，保留最新的点
+            data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end() - 1);//保留最新的点
+        }
+        else {
+            data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end());
+            data.current_interPoint.push_back(data.previous_interPoint.back());//使用上一帧的交点
+        }
+    }
+    else {
+        data.current_interPoint.erase(data.current_interPoint.begin(), data.current_interPoint.end() - 1);
+    }
+    data.previous_interPoint.clear();
+}
+
+//需要在循环外预先创建类ImgData的对象data,data：图像输入对象
+cv::Point2d ImgTask::getIntersection(ImgData& data, cv::Mat input, Point2d default_point) {
+
+    //static KalmanFilter1D* kf_x = nullptr;
+    //static double dt = 0.8; // 时间步长，根据实际情况调整
+    //static bool initialized = false;
+
+    if (m_count == 0) { 
+        data.inputcolor = input;
+        if (firstFrameProcess(data)){
+            m_count = 1;
+            return data.current_interPoint.back();
+        }
+    }
+    else {
+        data.clear();
+        data.inputcolor = input;
+        roiProcess(data);
+        InterPointUpdate(data);
+        if (data.current_interPoint.empty()) return default_point;
+        return data.current_interPoint.back();
+    }
+    return default_point;
+}
+
+//需要在循环外预先创建类ImgData的对象data
+cv::Point2d ImgTask::getIntersectionKF(ImgData& data, cv::Mat input, Point2d default_point) {
+
+	if (m_countKF == 0) {
+		data.inputcolor = input;
+		if (firstFrameProcess(data)) {
+			m_countKF = 1;
+			return data.current_interPoint.back();
+		}
+	}
+	else {
+		data.clear();
+		data.inputcolor = input;
+		roiProcess(data);
+
+		static KalmanFilter1D pkf(0, 0, 0.8, 0.1, 0.5);
+		if (data.current_interPoint.empty()) return default_point;
+		pkf.KalmanFilter1D_2(data.current_interPoint.back());    // 原地滤波
+		std::cout << "Kalman Filter: " << data.current_interPoint.back() << std::endl;
+
+		InterPointUpdate(data);
+		if (data.current_interPoint.empty()) return default_point;
+		return data.current_interPoint.back();
+	}
+	return default_point;
+}
+
+cv::Point2d ImgTask::HoughgetIntersection(ImgData& data, cv::Mat input, Point2d default_point) {
+    data.clear();
+    data.inputcolor = input;
+    if (firstFrameProcess(data)) {
+        return data.current_interPoint.back();
+    }
+    return default_point;
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Encoding" addBOMForNewFiles="with BOM under Windows, with no BOM otherwise">
+    <file url="file://$PROJECT_DIR$/18RobotControl/18RobotControl.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/18RobotControl.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/18RobotControlDlg.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/18RobotControlDlg.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/Page1Dlg.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/Page2Dlg.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/Page3Dlg.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/camera.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/camera.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/file_utils.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/file_utils.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/img_lines.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/img_lines.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/img_process.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/img_process.h" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/particlefilter.cpp" charset="GB2312" />
+    <file url="file://$PROJECT_DIR$/18RobotControl/particlefilter.h" charset="GB2312" />
+  </component>
+</project>

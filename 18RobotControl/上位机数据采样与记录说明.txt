@@ -1,0 +1,207 @@
+﻿上位机数据采样与记录说明
+============================================================
+
+对应按钮：IDC_BUTTON12（界面上的“图像采样”按钮）
+处理函数：CPage1Dlg::OnBnClickedButton12()
+代码位置：Page1Dlg.cpp 第 1044～1097 行
+
+------------------------------------------------------------
+一、功能概述
+------------------------------------------------------------
+点击“采样”按钮后，程序会完成以下工作：
+
+1. 启动摄像头实时预览；
+2. 创建 SamplePhotos 照片保存目录；
+3. 从摄像头读取一帧图像；
+4. 用当前机器人位姿数据生成图片文件名并保存 JPG；
+5. 将当前位姿数据写入 SampleData.txt；
+6. 更新界面上的 IDC_STATIC1 文本。
+
+记录的数据包括：
+    R1.AngleOut  —— 角度值
+    R1.VertOut   —— 竖直位移（H1）
+    R1.HoriOut   —— 水平位移（L2）
+    X0           —— X 方向位移
+
+------------------------------------------------------------
+二、执行步骤
+------------------------------------------------------------
+步骤 1：从控件读取数据
+    UpdateData(TRUE);
+
+步骤 2：启动定时器 8，开启摄像头实时预览
+    SetTimer(8, 100, nullptr);
+
+    定时器 8 每 100 ms 执行一次：
+        cv::Mat frame;
+        if (cap.read(frame)) cv::imshow("img", frame);
+
+步骤 3：创建照片目录
+    LPCWSTR folderName = L"SamplePhotos";
+    CreateDirectory(folderName, NULL);
+
+    如果目录创建失败且目录不存在，则弹出提示并返回。
+
+步骤 4：读取一帧图像
+    cv::Mat frame;
+    if (cap.read(frame) && !frame.empty()) {
+        ...
+    }
+
+步骤 5：生成图片文件名
+    std::snprintf(filename, sizeof(filename),
+        "SamplePhotos/%.2f_%.2f_%.2f_%.2f.jpg",
+        R1.AngleOut,
+        R1.VertOut,
+        R1.HoriOut,
+        X0);
+
+    文件名格式：
+        SamplePhotos/角度_竖直位移_水平位移_X0.jpg
+
+    例如：
+        SamplePhotos/30.00_12.50_-20.00_5.00.jpg
+
+步骤 6：保存图像
+    cv::imwrite(filename, frame);
+
+步骤 7：打开数据文件
+    SampleLogFile.open("SampleData.txt", std::ios::out);
+
+    注意：std::ios::out 是覆盖模式。
+
+步骤 8：写入表头
+    SampleLogFile << "Angle(deg)	H1	L2	X0
+";
+
+步骤 9：写入当前位姿数据
+    SampleLogFile << R1.AngleOut << "	"
+                  << R1.VertOut  << "	"
+                  << R1.HoriOut  << "	"
+                  << X0          << "
+";
+
+步骤 10：更新界面显示
+    std::snprintf(dat, sizeof(dat),
+        "Angle:%.2f
+VertDis:%.2f
+HoriDis:%.2f
+X0:%.2f",
+        R1.AngleOut, R1.VertOut, R1.HoriOut, X0);
+
+    m_static1 = dat;
+    GetDlgItem(IDC_STATIC1)->SetWindowText(m_static1);
+
+------------------------------------------------------------
+三、完整代码
+------------------------------------------------------------
+1. 按钮处理函数（Page1Dlg.cpp）
+
+void CPage1Dlg::OnBnClickedButton12()
+{
+    // TODO: 在此添加控件通知处理程序代码
+    UpdateData(TRUE);    // 从控件读取数据
+
+    SetTimer(8, 100, nullptr);
+
+    // 创建用于保存照片的文件夹
+    LPCWSTR folderName = L"SamplePhotos";
+    if (CreateDirectory(folderName, NULL) || GetLastError() == ERROR_ALREADY_EXISTS) {
+        // 文件夹创建成功或已存在
+    }
+    else {20:13 2026/11/18
+        // 创建文件夹失败
+        AfxMessageBox(_T("无法创建 SamplePhotos 文件夹！"));
+        return;
+    }
+
+    // 拍照并保存
+    cv::Mat frame;
+    if (cap.read(frame) && !frame.empty()) {
+        // 创建文件名，包含角度信息
+        char filename[200];
+        std::snprintf(filename, sizeof(filename),
+            "SamplePhotos/%.2f_%.2f_%.2f_%.2f.jpg",
+            R1.AngleOut, // 角度值
+            R1.VertOut,  // H1值
+            R1.HoriOut,  // L2值
+            X0);         // X方向位移
+        cv::imwrite(filename, frame); // 保存图像
+    }
+
+    SampleLogFile.open("SampleData.txt", std::ios::out);
+    if (!SampleLogFile.is_open()) {
+        AfxMessageBox(_T("无法打开 SampleData.txt 文件！"));
+        return;
+    }
+
+    if (SampleLogFile.is_open()) {
+        SampleLogFile << "Angle(deg)	H1	L2	X0
+";
+    }
+
+    // 记录到文件
+    if (SampleLogFile.is_open()) {
+        SampleLogFile << R1.AngleOut << "	"
+                      << R1.VertOut  << "	"
+                      << R1.HoriOut  << "	"
+                      << X0          << "
+";
+    }
+
+    char dat[100];
+    std::snprintf(dat, sizeof(dat),
+        "Angle:%.2f
+VertDis:%.2f
+HoriDis:%.2f
+X0:%.2f",
+        R1.AngleOut, R1.VertOut, R1.HoriOut, X0);
+
+    m_static1 = dat;
+    GetDlgItem(IDC_STATIC1)->SetWindowText(m_static1);
+    //UpdateData(FALSE);
+}
+
+2. 定时器 8 的预览代码（Page1Dlg.cpp）
+
+if (nIDEvent == 8) {
+    cv::Mat frame;
+    if (cap.read(frame)) cv::imshow("img", frame);
+}
+
+------------------------------------------------------------
+四、生成的文件
+------------------------------------------------------------
+1. SamplePhotos 文件夹
+   保存采样时刻的摄像头图像，文件名包含当前位姿数据。
+
+2. SampleData.txt
+   保存表头和一次采样数据：
+
+   Angle(deg)    H1    L2    X0
+   30.00         12.50 -20.00 5.00
+
+------------------------------------------------------------
+五、当前代码需要注意的问题
+------------------------------------------------------------
+1. SampleLogFile 没有调用 close()
+   第一次点击后文件流会一直保持打开。第二次点击时再次 open()
+   可能失败并进入 fail 状态，导致后续写入无效。
+   建议每次写完调用：
+       SampleLogFile.close();
+
+2. 使用 std::ios::out 会覆盖文件
+   如果希望保留多次采样记录，应改成：
+       std::ios::app
+   并在写入后关闭文件。
+
+3. 定时器 8 不会自动停止
+   点击采样按钮后摄像头预览会持续运行，只有点击“急停”按钮
+   （其中调用了 KillTimer(8)）或关闭程序才会停止。
+
+4. 没有检查图像保存结果
+   cap.read() 或 cv::imwrite() 失败时，程序仍会继续写
+   SampleData.txt，可能出现“有数据但没有图片”的情况。
+
+5. 文件名没有时间戳
+   如果位姿数据相同，多次采样会覆盖同一张 JPG 文件。
