@@ -1,8 +1,29 @@
-﻿生成启动时间为 2026/11/19 8:58:19。
-     1>项目“D:\download\labcode\18RobotControlTest3-1\18RobotControl\18RobotControl.vcxproj”在节点 2 上(Build 个目标)。
+﻿生成启动时间为 2026/11/19 14:31:00。
+     1>项目“D:\download\labcode\18RobotControlTest3-2\18RobotControl\18RobotControl.vcxproj”在节点 2 上(Build 个目标)。
      1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V140\Microsoft.CppBuild.targets(392,5): warning MSB8028: The intermediate directory (x64\Debug\) contains files shared from another project (18RobotControl-1.vcxproj).  This can lead to incorrect clean and rebuild behavior.
-     1>Link:
-         D:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\x86_amd64\link.exe /ERRORREPORT:PROMPT /OUT:"D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.exe" /INCREMENTAL /NOLOGO /LIBPATH:D:\download\opencv\build\x64\vc15\lib opencv_world460d.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /manifestinput:"D:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Include\Manifest\dpiaware.manifest" /Debug /PDB:"D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.pdb" /SUBSYSTEM:WINDOWS /TLBID:1 /ENTRY:"wWinMainCRTStartup" /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.lib" /MACHINE:X64 x64\Debug\18RobotControl.res
+     1>ClCompile:
+         D:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\x86_amd64\CL.exe /c /ID:\download\opencv\build\include /ZI /nologo /W3 /WX- /sdl /Od /D _WINDOWS /D _DEBUG /D _UNICODE /D UNICODE /Gm /EHsc /RTC1 /MTd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"x64\Debug\\" /Fd"x64\Debug\vc140.pdb" /Gd /TP /errorReport:prompt img_data.cpp task.cpp
+         task.cpp
+     1>d:\download\labcode\18robotcontroltest3-2\18robotcontrol\kalmanfilter.h : warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+     1>d:\download\labcode\18robotcontroltest3-2\18robotcontrol\img_lines.h(157): warning C4244: “参数”: 从“double”转换到“int”，可能丢失数据
+         d:\download\labcode\18robotcontroltest3-2\18robotcontrol\task.cpp(121): note: 参见对正在编译的函数 模板 实例化“void img_lines::drawHoughPoint<cv::Vec4i>(cv::Mat &,cv::Point2d &,T,T,std::vector<cv::Point2d,std::allocator<_Ty>> &)”的引用
+                 with
+                 [
+                     T=cv::Vec4i,
+                     _Ty=cv::Point2d
+                 ]
+     1>d:\download\labcode\18robotcontroltest3-2\18robotcontrol\img_lines.h(187): warning C4244: “参数”: 从“double”转换到“int”，可能丢失数据
+         d:\download\labcode\18robotcontroltest3-2\18robotcontrol\task.cpp(221): note: 参见对正在编译的函数 模板 实例化“void img_lines::drawFitlinePoint<cv::Vec4f>(cv::Mat &,cv::Point2d &,T,T,std::vector<cv::Point2d,std::allocator<_Ty>> &)”的引用
+                 with
+                 [
+                     T=cv::Vec4f,
+                     _Ty=cv::Point2d
+                 ]
+     1>d:\download\labcode\18robotcontroltest3-2\18robotcontrol\img_lines.h(188): warning C4244: “参数”: 从“double”转换到“int”，可能丢失数据
+         img_data.cpp
+         正在生成代码...
+       Link:
+         D:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\x86_amd64\link.exe /ERRORREPORT:PROMPT /OUT:"D:\download\labcode\18RobotControlTest3-2\x64\Debug\18RobotControl-w.exe" /INCREMENTAL /NOLOGO /LIBPATH:D:\download\opencv\build\x64\vc15\lib opencv_world460d.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /manifestinput:"D:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Include\Manifest\dpiaware.manifest" /Debug /PDB:"D:\download\labcode\18RobotControlTest3-2\x64\Debug\18RobotControl-w.pdb" /SUBSYSTEM:WINDOWS /TLBID:1 /ENTRY:"wWinMainCRTStartup" /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\download\labcode\18RobotControlTest3-2\x64\Debug\18RobotControl-w.lib" /MACHINE:X64 x64\Debug\18RobotControl.res
          x64\Debug\18RobotControl.obj
          x64\Debug\18RobotControlDlg.obj
          x64\Debug\camera.obj
@@ -22,9 +43,9 @@
          x64\Debug\SerialPort.obj
          x64\Debug\stdafx.obj
          x64\Debug\task.obj
-         18RobotControl.vcxproj -> D:\download\labcode\18RobotControlTest3-1\x64\Debug\18RobotControl-w.exe
-     1>已完成生成项目“D:\download\labcode\18RobotControlTest3-1\18RobotControl\18RobotControl.vcxproj”(Build 个目标)的操作。
+         18RobotControl.vcxproj -> D:\download\labcode\18RobotControlTest3-2\x64\Debug\18RobotControl-w.exe
+     1>已完成生成项目“D:\download\labcode\18RobotControlTest3-2\18RobotControl\18RobotControl.vcxproj”(Build 个目标)的操作。
 
 已成功生成。
 
-已用时间 00:00:04.79
+已用时间 00:00:07.51

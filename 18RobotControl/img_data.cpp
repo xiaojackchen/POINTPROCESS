@@ -6,33 +6,15 @@ ImgData::ImgData() {};
 ImgData::~ImgData() {};
 
 void ImgData::clear(){
-	// Guard: roi_region is derived from the previous frame's intersection and the
-	// previous frame's image size. If either is unavailable there is nothing to
-	// derive from, so skip the ROI update (the field resets below still run).
-	if (!current_interPoint.empty() && !inputcolor.empty()) {
-		// 以第一交点为中心，同时把第二交点也纳入 ROI，保证两组直线都能被检出
-		const Point2d p1 = current_interPoint.back();
-		double left = p1.x - 100.0;
-		double right = p1.x + 100.0;
-
-		const bool hasSecond = intersection2.x > 0 && intersection2.y > 0 &&
-			intersection2.x < inputcolor.cols && intersection2.y < inputcolor.rows;
-		if (hasSecond) {
-			left = std::min(left, intersection2.x - 100.0);
-			right = std::max(right, intersection2.x + 100.0);
-		}
-
-		int roi_left = std::max(0, (int)std::floor(left));
-		int roi_right = std::min(inputcolor.cols, (int)std::ceil(right));
-		if (roi_right <= roi_left) roi_right = std::min(inputcolor.cols, roi_left + 1);
-		int roi_width = roi_right - roi_left;
-		if (roi_width < 1) roi_width = 1;
-
-		int roi_upper = 0;
-		int roi_height = inputcolor.rows;
-		roi_region.push_back(cv::Rect(roi_left, roi_upper, roi_width, roi_height));
-		if (roi_region.size() > 2) {
-			roi_region.erase(roi_region.begin());
+	// 固定 ROI：手工标定的一块区域，x 范围 [241, 949]，y 范围 [0, 720]
+	// 超出画面的部分自动裁掉，保证后续 inputcolor(rect)、copyTo(rect) 都不越界
+	if (!inputcolor.empty()) {
+		static const cv::Rect kFixedRoi(241, 0, 949 - 241, 720);
+		const cv::Rect rrFixed = kFixedRoi & cv::Rect(0, 0, inputcolor.cols, inputcolor.rows);
+		if (rrFixed.width > 0 && rrFixed.height > 0) {
+			// 固定 ROI 每帧只留一条，避免累积同一条框造成重复绘制、重复打印
+			roi_region.clear();
+			roi_region.push_back(rrFixed);
 		}
 	}
 	/*roi_region.clear();*/
@@ -62,4 +44,6 @@ void ImgData::clear(){
     lower_mask = cv::Mat();
     upper_roi = cv::Mat();
     lower_roi = cv::Mat();
+    final_lines1.clear();
+    final_lines2.clear();
 }

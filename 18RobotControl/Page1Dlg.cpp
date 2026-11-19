@@ -594,7 +594,7 @@ bool captureFrameWithDistance(cv::VideoCapture& cap, int frameCount, double dist
 	}
 
 	//返回值point是检测到的坐标值。参数Point2d(0, 0)用于设定默认值，预留。
-	P = task.getIntersection(framedata, frame, Point2d(0, 0));
+	P = task.getIntersection(framedata, frame, Point2d(0, 0))[0];   // 两个交点里的主交点
 
 	auto end = std::chrono::high_resolution_clock::now();
 	// 计算时间戳（直接使用高分辨率时钟）
@@ -603,21 +603,56 @@ bool captureFrameWithDistance(cv::VideoCapture& cap, int frameCount, double dist
 	UsLogWrite(dat, num);
 	return true;
 }
-// 在图像上只标记两个交点，不绘制直线和 ROI 矩形
+// 在图像上标记两个交点，并画出跟踪 ROI 条带与每个交点最终对应的两条直线
 // P1：-86 度与 75 度直线的交点；P2：86 度与 -75 度直线的交点
 static void DrawVideoOverlay(cv::Mat& img, const ImgData& data)
 {
-	cv::Point2d point;
-	bool hasPoint = false;
-	if (!data.current_interPoint.empty()) {
-		point = data.current_interPoint.back();
-		hasPoint = true;
+	// 跟踪 ROI：roiProcess 本帧实际裁剪的横向条带（最多保留两条，最新一条加粗并标注）
+	for (size_t i = 0; i < data.roi_region.size(); ++i) {
+		const cv::Rect rr = data.roi_region[i];
+		const bool isCurrent = (i + 1 == data.roi_region.size());
+		cv::rectangle(img, rr, cv::Scalar(0, 255, 0), isCurrent ? 2 : 1, cv::LINE_AA);
+		// 把本帧真正画在图像上的 ROI 打到日志（坐标口径与 createRoiMasks 一致）
+		std::cout << "显示ROI" << (isCurrent ? "(当前帧)" : "(上一帧)")
+			<< ": x范围 [" << rr.x << ", " << rr.x + rr.width << "]"
+			<< "  y范围 [" << rr.y << ", " << rr.y + rr.height << "]" << std::endl;
+		if (isCurrent) {
+			char roiText[64];
+			std::snprintf(roiText, sizeof(roiText), "ROI x=%d w=%d", rr.x, rr.width);
+			const int tx = (rr.x > 0 ? rr.x : 0) + 4;
+			cv::putText(img, roiText, cv::Point(tx, 16), cv::FONT_HERSHEY_SIMPLEX,
+				0.45, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+		}
 	}
-	else if (data.intersection.x > 0 && data.intersection.y > 0 &&
-		data.intersection.x < img.cols && data.intersection.y < img.rows) {
-		point = data.intersection;
-		hasPoint = true;
+
+	// 最终与每个交点相关的两条直线：0 = 近垂直线，1 = 斜线
+	// 精修成功的点画的是 RANSAC 拟合直线，没精修的画 Hough 线段，两者都已统一成 fitLine 形式
+	const cv::Scalar finalLineColors[2][2] = {
+		{ cv::Scalar(0, 255, 0),   cv::Scalar(255, 0, 0)   },   // P1: 绿 / 蓝
+		{ cv::Scalar(255, 255, 0), cv::Scalar(0, 165, 255) }    // P2: 青 / 橙
+	};
+	const std::vector<cv::Vec4f>* const finalLines[2] = { &data.final_lines1, &data.final_lines2 };
+	const double ext = std::sqrt((double)img.cols * img.cols + (double)img.rows * img.rows) + 10.0;
+	for (int k = 0; k < 2; ++k) {
+		const std::vector<cv::Vec4f>& ls = *finalLines[k];
+		for (size_t i = 0; i < ls.size() && i < 2; ++i) {
+			const double vx = ls[i][0];
+			const double vy = ls[i][1];
+			const double len = std::sqrt(vx * vx + vy * vy);
+			if (len < 1e-6) continue;                       // 这条线本帧没检测到
+			const double ux = vx / len;
+			const double uy = vy / len;
+			// 参考点沿方向向两端延长，保证直线贯穿整幅图像
+			const cv::Point pt1(cvRound(ls[i][2] - ux * ext), cvRound(ls[i][3] - uy * ext));
+			const cv::Point pt2(cvRound(ls[i][2] + ux * ext), cvRound(ls[i][3] + uy * ext));
+			cv::line(img, pt1, pt2, finalLineColors[k][i], 2, cv::LINE_AA);
+		}
 	}
+
+	// 第一交点：InterPointUpdate 已把它更新为最终值（含精修和单点回退）
+	cv::Point2d point = data.intersection;
+	bool hasPoint = point.x > 0 && point.y > 0 &&
+		point.x < img.cols && point.y < img.rows;
 	if (hasPoint) {
 		const cv::Point pt(cvRound(point.x), cvRound(point.y));
 		cv::circle(img, pt, 5, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
@@ -878,7 +913,7 @@ void CPage1Dlg::CalibrateHori()
 			for (int i = 0; i < N; ++i) cap.grab();   // 只抓不解码，最快
 			if (cap.retrieve(frame) && !frame.empty())	// 把 最近一次 cap.grab() 抓到的图像 解码到 frame，成功返回true
 			{
-				double x_temp = (task.getIntersection(framedata, frame, Point2d(0, 0))).x;
+				double x_temp = (task.getIntersection(framedata, frame, Point2d(0, 0)))[0].x;
 				sumx.push_back(x_temp);
 				Log.HoriCalibrateFile << x_temp << "\n";
 			}
@@ -975,7 +1010,7 @@ void CPage1Dlg::CalibrateVerti()
 			for (int i = 0; i < N; ++i) cap.grab();   // 只抓不解码，最快
 			if (cap.retrieve(frame) && !frame.empty())
 			{
-				double y_temp = (task.getIntersection(framedata, frame, Point2d(0, 0))).y;
+				double y_temp = (task.getIntersection(framedata, frame, Point2d(0, 0)))[0].y;
 				sumy.push_back(y_temp);
 				Log.VertiCalibrateFile << y_temp << "\n";
 			}
@@ -1363,12 +1398,7 @@ static void WriteIntersectionRecord()
 	if (g_intersectionRecordAxis == 0 || !g_intersectionLog.is_open())
 		return;
 
-	cv::Point2d p1;
-	if (!g_videoData.current_interPoint.empty())
-		p1 = g_videoData.current_interPoint.back();
-	else
-		p1 = g_videoData.intersection;
-
+	cv::Point2d p1 = g_videoData.intersection;
 	cv::Point2d p2 = g_videoData.intersection2;
 
 	// 只有两个交点都有效时才记录
@@ -1477,7 +1507,7 @@ void CPage1Dlg::OnBnClickedButton7()
 	else if (!GetProcessFrame(frame))
 		return;
 
-	// 与 firstFrameProcess 使用相同的 Hough 检测流程，但不影响正常识别状态
+	// 与 FrameProcess 使用相同的 Hough 检测流程，但不影响正常识别状态
 	ImgData data;
 	data.inputcolor = frame;
 
@@ -1582,7 +1612,7 @@ void CPage1Dlg::OnBnClickedButton21()
 	g_videoTask.Reset();
 
 	// 100 ms 定时器：每秒处理 10 帧
-	SetTimer(14, 100, nullptr);
+	SetTimer(14, 500, nullptr);
 }
 
 //水平滑块移动指定距离
@@ -1859,12 +1889,12 @@ bool CPage1Dlg::RobotScan(double SetAngle, bool enableCamera, bool kf)
 	//R1.PosTemp和R1.angles在CalculateAngle()函数中被清空了
 	if (kf)	//	使用卡尔曼滤波
 	{
-		R1.PosTemp.push_back(task.getIntersectionKF(framedata, frame, Point2d(0, 0)));
+		R1.PosTemp.push_back(task.getIntersectionKF(framedata, frame, Point2d(0, 0))[0]);
 		R1.angles.push_back(R1.AngleOut);
 	}
 	else
 	{
-		R1.PosTemp.push_back(task.getIntersection(framedata, frame, Point2d(0, 0)));
+		R1.PosTemp.push_back(task.getIntersection(framedata, frame, Point2d(0, 0))[0]);
 		R1.angles.push_back(R1.AngleOut);
 	}
 	char dat[100];
@@ -1930,11 +1960,11 @@ int CPage1Dlg::Scan(bool dir)
 	
 		//更新完机器人角度立刻把检测到的坐标值添加到PosTemp。参数Point2d(0, 0)用于设定默认值，预留。
 		//带KF使用了卡尔曼滤波
-		R1.PosTempKF.push_back(task.getIntersectionKF(framedata1, frame, Point2d(0, 0)));
+		R1.PosTempKF.push_back(task.getIntersectionKF(framedata1, frame, Point2d(0, 0))[0]);
 		x_values.push_back(R1.PosTempKF.back().x);	//	使用x值
 		R1.anglesKF.push_back(R1.AngleOut);
 
-		R1.PosTemp.push_back(task.getIntersection(framedata, frame, Point2d(0, 0)));
+		R1.PosTemp.push_back(task.getIntersection(framedata, frame, Point2d(0, 0))[0]);
 		x_values2.push_back(R1.PosTemp.back().x);
 		R1.angles.push_back(R1.AngleOut);
 
@@ -2354,7 +2384,7 @@ double CPage1Dlg::CalculateHori()
 		for (int i = 0; i < N; ++i) cap.grab();   // 只抓不解码，最快
 		if (cap.retrieve(frame) && !frame.empty())
 		{
-			double x_temp = (task.getIntersection(framedata, frame, Point2d(0, 0))).x;
+			double x_temp = (task.getIntersection(framedata, frame, Point2d(0, 0)))[0].x;
 			sumx.push_back(x_temp);
 		}
 		else {
@@ -2394,7 +2424,7 @@ double CPage1Dlg::CalculateVerti()
 		for (int i = 0; i < N; ++i) cap.grab();   // 只抓不解码，最快
 		if (cap.retrieve(frame) && !frame.empty())
 		{
-			double y_temp = (task.getIntersection(framedata, frame, Point2d(0, 0))).y;
+			double y_temp = (task.getIntersection(framedata, frame, Point2d(0, 0)))[0].y;
 			sumy.push_back(y_temp);
 		}
 		else {
