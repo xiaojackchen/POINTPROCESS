@@ -607,7 +607,7 @@ bool captureFrameWithDistance(cv::VideoCapture& cap, int frameCount, double dist
 // P1：-86 度与 75 度直线的交点；P2：86 度与 -75 度直线的交点
 static void DrawVideoOverlay(cv::Mat& img, const ImgData& data)
 {
-	// 跟踪 ROI：roiProcess 本帧实际裁剪的横向条带（最多保留两条，最新一条加粗并标注）
+	// 固定 ROI：ImgData::clear() 每帧只放一条，这里画出并标注它的坐标
 	for (size_t i = 0; i < data.roi_region.size(); ++i) {
 		const cv::Rect rr = data.roi_region[i];
 		const bool isCurrent = (i + 1 == data.roi_region.size());
@@ -622,30 +622,6 @@ static void DrawVideoOverlay(cv::Mat& img, const ImgData& data)
 			const int tx = (rr.x > 0 ? rr.x : 0) + 4;
 			cv::putText(img, roiText, cv::Point(tx, 16), cv::FONT_HERSHEY_SIMPLEX,
 				0.45, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-		}
-	}
-
-	// 最终与每个交点相关的两条直线：0 = 近垂直线，1 = 斜线
-	// 精修成功的点画的是 RANSAC 拟合直线，没精修的画 Hough 线段，两者都已统一成 fitLine 形式
-	const cv::Scalar finalLineColors[2][2] = {
-		{ cv::Scalar(0, 255, 0),   cv::Scalar(255, 0, 0)   },   // P1: 绿 / 蓝
-		{ cv::Scalar(255, 255, 0), cv::Scalar(0, 165, 255) }    // P2: 青 / 橙
-	};
-	const std::vector<cv::Vec4f>* const finalLines[2] = { &data.final_lines1, &data.final_lines2 };
-	const double ext = std::sqrt((double)img.cols * img.cols + (double)img.rows * img.rows) + 10.0;
-	for (int k = 0; k < 2; ++k) {
-		const std::vector<cv::Vec4f>& ls = *finalLines[k];
-		for (size_t i = 0; i < ls.size() && i < 2; ++i) {
-			const double vx = ls[i][0];
-			const double vy = ls[i][1];
-			const double len = std::sqrt(vx * vx + vy * vy);
-			if (len < 1e-6) continue;                       // 这条线本帧没检测到
-			const double ux = vx / len;
-			const double uy = vy / len;
-			// 参考点沿方向向两端延长，保证直线贯穿整幅图像
-			const cv::Point pt1(cvRound(ls[i][2] - ux * ext), cvRound(ls[i][3] - uy * ext));
-			const cv::Point pt2(cvRound(ls[i][2] + ux * ext), cvRound(ls[i][3] + uy * ext));
-			cv::line(img, pt1, pt2, finalLineColors[k][i], 2, cv::LINE_AA);
 		}
 	}
 
