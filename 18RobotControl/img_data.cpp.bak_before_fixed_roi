@@ -1,0 +1,63 @@
+#include "img_data.h"
+#include <algorithm>
+#include <cmath>
+
+ImgData::ImgData() {};
+ImgData::~ImgData() {};
+
+void ImgData::clear(){
+	// Guard: roi_region is derived from the previous frame's intersection and the
+	// previous frame's image size. If either is unavailable there is nothing to
+	// derive from, so skip the ROI update (the field resets below still run).
+	if (!current_interPoint.empty() && !inputcolor.empty()) {
+		// 以本帧两个交点为中心取横向范围，保证两组直线都能落在 ROI 内
+		double left = current_interPoint.front().x - 100.0;
+		double right = current_interPoint.front().x + 100.0;
+		for (size_t i = 1; i < current_interPoint.size(); ++i) {
+			left = std::min(left, current_interPoint[i].x - 100.0);
+			right = std::max(right, current_interPoint[i].x + 100.0);
+		}
+
+		int roi_left = std::max(0, (int)std::floor(left));
+		int roi_right = std::min(inputcolor.cols, (int)std::ceil(right));
+		if (roi_right <= roi_left) roi_right = std::min(inputcolor.cols, roi_left + 1);
+		int roi_width = roi_right - roi_left;
+		if (roi_width < 1) roi_width = 1;
+
+		int roi_upper = 0;
+		int roi_height = inputcolor.rows;
+		roi_region.push_back(cv::Rect(roi_left, roi_upper, roi_width, roi_height));
+		if (roi_region.size() > 2) {
+			roi_region.erase(roi_region.begin());
+		}
+	}
+	/*roi_region.clear();*/
+
+    inputcolor = cv::Mat();
+    
+    binary = cv::Mat();
+    bilFilt_img = cv::Mat();
+    input2 = cv::Mat();
+    skeleton = cv::Mat();
+    global_skeleton = cv::Mat();
+    input_roicolor = cv::Mat();
+    vertical_line = cv::Vec4i();
+    incline_line = cv::Vec4i();
+    lineEquation_vertical = LineEquation();
+    lineEquation_incline = LineEquation();
+    vertical_line2 = cv::Vec4i();
+    incline_line2 = cv::Vec4i();
+    lineEquation_vertical2 = LineEquation();
+    lineEquation_incline2 = LineEquation();
+    intersection2 = cv::Point2d();
+    upper_line = cv::Vec4f();
+    lower_line = cv::Vec4f();
+    intersection = cv::Point2d();
+    long_lines.clear();
+    upper_mask = cv::Mat();
+    lower_mask = cv::Mat();
+    upper_roi = cv::Mat();
+    lower_roi = cv::Mat();
+    final_lines1.clear();
+    final_lines2.clear();
+}

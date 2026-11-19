@@ -1,0 +1,344 @@
+#include "task.h"
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include "particlefilter.h"
+#include "KalmanFilter.h"
+
+using namespace cv;
+using namespace std;
+
+particlefilter tracker;
+
+// 重置视频处理状态：重新加载视频时从第一帧开始
+void ImgTask::Reset()
+{
+	m_count = 0;
+	m_countKF = 0;
+}
+
+// 从当前 long_lines 中寻找直线并分别计算交点（新规则）：
+//   两条近垂直线都在 87 度左右、角度相近，无法靠角度区分，
+//   改由 findTargetLinesByAngle 按"到图像原点的距离"排序后直接输出：
+//     nearVertical[0] = 距离大的直线 -> 与  75 度直线求交点（intersection）
+//     nearVertical[1] = 距离小的直线 -> 与 -75 度直线求交点（intersection2）
+//   这里不再重复计算和比较距离。
+bool ImgTask::findHoughIntersections(ImgData& data)
+{
+    img_lines lines;
+    data.intersection = Point2d();
+    data.intersection2 = Point2d();
+    data.vertical_line = Vec4i();
+    data.incline_line = Vec4i();
+    data.vertical_line2 = Vec4i();
+    data.incline_line2 = Vec4i();
+
+    // 1. 找两条 87 度左右的近垂直线：函数内部已按到原点距离排好，[0] 最远，[1] 最近
+    vector<Vec4i> nearVertical;
+    lines.findTargetLinesByAngle(data.long_lines, 87.0, nearVertical, 2);
+
+    // 2. 75 / -75 度直线：找法不变
+    const bool has75 = lines.findTargetLines(data.long_lines, 75.0, data.vertical_line);
+    const bool hasNeg75 = lines.findTargetLines(data.long_lines, -75.0, data.vertical_line2);
+
+    bool pair1 = false;
+    bool pair2 = false;
+    if (nearVertical.size() >= 2 && has75 && hasNeg75) {
+        // 3. 远的配 75 度，近的配 -75 度，直接用现成顺序
+        data.incline_line = nearVertical[0];        // 距离最大
+        pair1 = lines.calculateIntersectionHough(data.vertical_line, data.incline_line,
+            data.intersection, data.lineEquation_vertical, data.lineEquation_incline);
+
+        data.incline_line2 = nearVertical[1];       // 距离最小
+        pair2 = lines.calculateIntersectionHough(data.vertical_line2, data.incline_line2,
+            data.intersection2, data.lineEquation_vertical2, data.lineEquation_incline2);
+    }
+
+    return pair1 || pair2;
+}
+
+// ================= 两个交点的统一处理 =================
+
+// 交点是否落在图像有效区域内（绘制、控制都要求正坐标且在画面内）
+bool ImgTask::isPointValid(const Point2d& p, const Mat& img)
+{
+    return !img.empty() && p.x > 0 && p.y > 0 && p.x < img.cols && p.y < img.rows;
+}
+
+// 把本帧生效的两个交点按固定顺序打包，无效的位置填 default_point
+vector<Point2d> ImgTask::collectPoints(const ImgData& data, const Point2d& default_point) const
+{
+    vector<Point2d> pts(2, default_point);
+    if (isPointValid(data.intersection, data.inputcolor)) {
+        pts[0] = data.intersection;
+    }
+    if (isPointValid(data.intersection2, data.inputcolor)) {
+        pts[1] = data.intersection2;
+    }
+    return pts;
+}
+
+// 单个交点的 ROI 精修：以该点为中心取上下两块掩膜，RANSAC 拟合后求两直线交点
+// 成功返回 true 并写回 point；任一步失败返回 false，point 保持原值
+bool ImgTask::refinePointByRoi(ImgData& data, Point2d& point)
+{
+    if (!isPointValid(point, data.inputcolor) || data.global_skeleton.empty()) {
+        return false;
+    }
+    const int cx = (int)cvRound(point.x);
+    const int cy = (int)cvRound(point.y);
+
+    // 调试可视化：记录本次精修实际使用的上下两个 ROI 窗口，供 DrawVideoOverlay 画出
+    data.refine_roi_rects.push_back(cv::Rect(cx - 10, cy - 150, 20, 145));   // 上窗口
+    data.refine_roi_rects.push_back(cv::Rect(cx + 5,  cy + 5,   20, 145));   // 下窗口
+
+    img_roi roi;
+    img_lines lines;
+    if (!roi.createRoiMasks(data.inputcolor, data.global_skeleton,
+            cy - 150, cy - 5,          // 上区域 y 范围
+            cy + 5, cy + 150,          // 下区域 y 范围
+            cx - 10, cx + 10,          // 上区域 x 范围
+            cx + 5, cx + 25,           // 下区域 x 范围
+            data.upper_mask, data.lower_mask,
+            data.upper_roi, data.lower_roi)) {
+        return false;
+    }
+
+    lines.RANSAC_fitLine(data.upper_roi, data.upper_line);
+    lines.RANSAC_fitLine(data.lower_roi, data.lower_line);
+
+    Point2d refined;
+    LineEquation eq_upper, eq_lower;
+    if (!lines.calculateIntersectionFitline(data.upper_line, data.lower_line,
+            refined, eq_upper, eq_lower)) {
+        return false;
+    }
+    if (!isPointValid(refined, data.inputcolor)) {
+        return false;
+    }
+
+    // 调试可视化：只画图，不把点写进 current_interPoint
+    vector<Point2d> dummy;
+    lines.drawFitlinePoint(data.inputcolor, refined, data.upper_line, data.lower_line, dummy);
+    point = refined;
+    return true;
+}
+
+// 两个交点各自独立处理：Hough 结果 → ROI 精修 → 无效则回退到该点上一帧的有效值
+void ImgTask::resolvePoints(ImgData& data)
+{
+    // ---------- 第一交点：75 度直线 ∩ 远侧近垂直线 ----------
+    Point2d p1 = data.intersection;
+    if (!isPointValid(p1, data.inputcolor)) {
+        cout << "第一交点: Hough 未找到" << endl;
+    }
+    else if (refinePointByRoi(data, p1)) {
+        cout << "第一交点: ROI 精修成功 (" << p1.x << ", " << p1.y << ")" << endl;
+    }
+    else {
+        cout << "第一交点: ROI 精修失败, 保留 Hough 结果" << endl;
+    }
+    if (!isPointValid(p1, data.inputcolor)) {
+        if (isPointValid(data.lastIntersection, data.inputcolor)) {
+            p1 = data.lastIntersection;
+            cout << "第一交点: 无效, 回退上一帧 (" << p1.x << ", " << p1.y << ")" << endl;
+        }
+        else {
+            p1 = Point2d();
+            cout << "第一交点: 无效且无上一帧可回退" << endl;
+        }
+    }
+    data.intersection = p1;
+
+    // ---------- 第二交点：-75 度直线 ∩ 近侧近垂直线 ----------
+    Point2d p2 = data.intersection2;
+    if (!isPointValid(p2, data.inputcolor)) {
+        cout << "第二交点: Hough 未找到" << endl;
+    }
+    else if (refinePointByRoi(data, p2)) {
+        cout << "第二交点: ROI 精修成功 (" << p2.x << ", " << p2.y << ")" << endl;
+    }
+    else {
+        cout << "第二交点: ROI 精修失败, 保留 Hough 结果" << endl;
+    }
+    if (!isPointValid(p2, data.inputcolor)) {
+        if (isPointValid(data.lastIntersection2, data.inputcolor)) {
+            p2 = data.lastIntersection2;
+            cout << "第二交点: 无效, 回退上一帧 (" << p2.x << ", " << p2.y << ")" << endl;
+        }
+        else {
+            p2 = Point2d();
+            cout << "第二交点: 无效且无上一帧可回退" << endl;
+        }
+    }
+    data.intersection2 = p2;
+
+    // 本帧候选列表：固定按 P1、P2 顺序保存有效的点
+    data.current_interPoint.clear();
+    if (isPointValid(data.intersection, data.inputcolor)) {
+        data.current_interPoint.push_back(data.intersection);
+    }
+    if (isPointValid(data.intersection2, data.inputcolor)) {
+        data.current_interPoint.push_back(data.intersection2);
+    }
+}
+
+// 统一处理：骨架检测长直线 → Hough 求两组交点 → 两个点各自精修与回退
+// threshold 等参数：整帧用 (30,30,100)，ROI 用 (10,10,50)
+bool ImgTask::FrameProcess(ImgData& data, int threshold, int minLineLength, int maxLineGap)
+{
+    if (data.inputcolor.empty() || data.global_skeleton.empty()) {
+        cerr << "FrameProcess: 图像或骨架为空" << endl;
+        return false;
+    }
+    img_lines lines;
+    lines.detectLongLines(data.global_skeleton, data.inputcolor, data.long_lines,
+        threshold, minLineLength, maxLineGap);
+    findHoughIntersections(data);
+
+    // 调试可视化：画出 Hough 得到的两个原始交点（不写入 current_interPoint）
+    vector<Point2d> dummy;
+    if (isPointValid(data.intersection, data.inputcolor)) {
+        lines.drawHoughPoint(data.inputcolor, data.intersection,
+            data.vertical_line, data.incline_line, dummy);
+    }
+    if (isPointValid(data.intersection2, data.inputcolor)) {
+        lines.drawHoughPoint(data.inputcolor, data.intersection2,
+            data.vertical_line2, data.incline_line2, dummy);
+    }
+
+    resolvePoints(data);
+    return !data.current_interPoint.empty();
+}
+
+// 后续帧：按上一帧两个交点算出的 ROI 做局部预处理，再走统一的 FrameProcess
+void ImgTask::roiProcess(ImgData& data)
+{
+    bool roi_ok = !data.roi_region.empty() && !data.inputcolor.empty();
+    if (roi_ok) {
+        const Rect rr = data.roi_region.back();
+        roi_ok = rr.x >= 0 && rr.y >= 0 && rr.width > 0 && rr.height > 0 &&
+                 rr.x + rr.width  <= data.inputcolor.cols &&
+                 rr.y + rr.height <= data.inputcolor.rows;
+    }
+    if (!roi_ok) {
+        // ROI 不可用（首帧或跟踪丢失）：退回整帧预处理，保证这一帧仍能检测
+        cout << "roiProcess: ROI 不可用, 改用整帧处理" << endl;
+        ImgProcess process;
+        process.preprocessImage(data);
+        data.global_skeleton = data.skeleton;
+        FrameProcess(data, 30, 30, 100);
+        return;
+    }
+
+    cout << "roi" << data.roi_region.back() << endl;
+    data.input_roicolor = data.inputcolor(data.roi_region.back());
+    ImgProcess process;
+    process.roipreprocessImage(data);
+    FrameProcess(data);
+}
+
+// 记录本帧生效的两个交点，作为下一帧单点异常时的回退值
+void ImgTask::InterPointUpdate(ImgData& data)
+{
+    if (isPointValid(data.intersection, data.inputcolor)) {
+        data.lastIntersection = data.intersection;
+    }
+    if (isPointValid(data.intersection2, data.inputcolor)) {
+        data.lastIntersection2 = data.intersection2;
+    }
+    data.previous_interPoint.clear();
+    data.previous_interPoint.insert(data.previous_interPoint.end(),
+        data.current_interPoint.begin(), data.current_interPoint.end());
+}
+
+// 需要在循环外预先创建类ImgData的对象data,data：图像输入对象
+// 返回值：两个交点，pts[0] 第一交点、pts[1] 第二交点，无效的位置为 default_point
+vector<Point2d> ImgTask::getIntersection(ImgData& data, Mat input, Point2d default_point)
+{
+    if (input.empty()) {
+        cerr << "No Image Input" << endl;
+        return vector<Point2d>(2, default_point);
+    }
+    data.clear();               // 先按上一帧两点更新 roi_region，再清空其余字段
+    data.inputcolor = input;
+
+    if (m_count == 0) {
+        // 首帧：整帧预处理后直接走统一的检测流程（原 firstFrameProcess 已并入 FrameProcess）
+        ImgProcess process;
+        process.preprocessImage(data);
+        data.global_skeleton = data.skeleton;
+        if (FrameProcess(data, 30, 30, 100)) {
+            m_count = 1;
+            InterPointUpdate(data);
+        }
+        return collectPoints(data, default_point);
+    }
+
+    roiProcess(data);
+    InterPointUpdate(data);
+    return collectPoints(data, default_point);
+}
+
+// 需要在循环外预先创建类ImgData的对象data
+vector<Point2d> ImgTask::getIntersectionKF(ImgData& data, Mat input, Point2d default_point)
+{
+    if (input.empty()) {
+        cerr << "No Image Input" << endl;
+        return vector<Point2d>(2, default_point);
+    }
+    data.clear();
+    data.inputcolor = input;
+
+    if (m_countKF == 0) {
+        ImgProcess process;
+        process.preprocessImage(data);
+        data.global_skeleton = data.skeleton;
+        if (FrameProcess(data, 30, 30, 100)) {
+            m_countKF = 1;
+            InterPointUpdate(data);
+        }
+        return collectPoints(data, default_point);
+    }
+
+    roiProcess(data);
+
+    // 两个点各用一个滤波器，避免两个点的状态互相污染
+    static KalmanFilter1D kf1(0, 0, 0.8, 0.1, 0.5);
+    static KalmanFilter1D kf2(0, 0, 0.8, 0.1, 0.5);
+    if (isPointValid(data.intersection, data.inputcolor)) {
+        kf1.KalmanFilter1D_2(data.intersection);    // 原地滤波
+    }
+    if (isPointValid(data.intersection2, data.inputcolor)) {
+        kf2.KalmanFilter1D_2(data.intersection2);
+    }
+    cout << "Kalman Filter: " << data.intersection << " | " << data.intersection2 << endl;
+
+    // 滤波后的值同步到候选列表，保持 current_interPoint 与 intersection/intersection2 一致
+    data.current_interPoint.clear();
+    if (isPointValid(data.intersection, data.inputcolor)) {
+        data.current_interPoint.push_back(data.intersection);
+    }
+    if (isPointValid(data.intersection2, data.inputcolor)) {
+        data.current_interPoint.push_back(data.intersection2);
+    }
+
+    InterPointUpdate(data);
+    return collectPoints(data, default_point);
+}
+
+// 纯 Hough 检测一次（调试按钮用），不影响正常跟踪状态
+vector<Point2d> ImgTask::HoughgetIntersection(ImgData& data, Mat input, Point2d default_point)
+{
+    if (input.empty()) {
+        cerr << "No Image Input" << endl;
+        return vector<Point2d>(2, default_point);
+    }
+    data.clear();
+    data.inputcolor = input;
+
+    ImgProcess process;
+    process.preprocessImage(data);
+    data.global_skeleton = data.skeleton;
+    FrameProcess(data, 30, 30, 100);
+    return collectPoints(data, default_point);
+}

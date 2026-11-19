@@ -1,0 +1,33 @@
+#pragma once
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include "img_lines.h"//已经引入img_process.h(引入img_data.h, img_thinning.h), img_roi.h
+
+
+using namespace cv;
+using namespace std;
+
+class ImgTask { 
+public:
+	// 每帧返回两个交点：pts[0] = 第一交点(75 度直线 ∩ 远侧近垂直线)，pts[1] = 第二交点(-75 度直线 ∩ 近侧近垂直线)
+	// 某个点无效时该元素为 default_point，可用 p.x > 0 && p.y > 0 判断是否有效
+	std::vector<cv::Point2d> getIntersection(ImgData& data, cv::Mat input, Point2d default_point);
+	std::vector<cv::Point2d> getIntersectionKF(ImgData& data, cv::Mat input, Point2d default_point);
+	std::vector<cv::Point2d> HoughgetIntersection(ImgData& data, cv::Mat input, Point2d default_point);
+
+	// 统一的检测流程：骨架检测长直线 → Hough 求两组交点 → 两个点各自精修/回退
+	bool FrameProcess(ImgData& data, int threshold = 10, int minLineLength = 10, int maxLineGap = 50);
+	void roiProcess(ImgData& data);        // ROI 局部预处理后交给 FrameProcess
+	void InterPointUpdate(ImgData& data);  // 记录本帧生效的两个点，供下一帧单点回退
+	bool findHoughIntersections(ImgData& data);  // 从 long_lines 中求两组直线的交点
+	void Reset();  // 重置首帧和 ROI 状态，用于重新加载视频
+
+private:
+	bool refinePointByRoi(ImgData& data, cv::Point2d& point);   // 单个交点的 ROI + RANSAC 精修
+	void resolvePoints(ImgData& data);                          // 两个点各自：校验 → 精修 → 回退
+	std::vector<cv::Point2d> collectPoints(const ImgData& data, const cv::Point2d& default_point) const;
+	static bool isPointValid(const cv::Point2d& p, const cv::Mat& img);
+
+	int m_count = 0;    // 首帧计数
+	int m_countKF = 0;  // 带卡尔曼滤波分支的首帧计数
+};
