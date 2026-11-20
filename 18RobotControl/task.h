@@ -17,8 +17,9 @@ public:
 
 	bool firstFrameProcess(ImgData& data);        // 首帧：整帧预处理 → 检测直线 → 求两个交点
 	bool FrameProcess(ImgData& data);             // 用 global_skeleton 再做一次 Hough 检测（异常时兜底）
+	bool HoughRedetect(ImgData& data);            // 整图预处理 + Hough 重检（跳变/越界兜底，不受 ROI 限制）
 	void roiProcess(ImgData& data);               // ROI 局部预处理 + 两个交点各自的 RANSAC 精修
-	void InterPointUpdate(ImgData& data);         // 两个点各自校验：越界/跳变 → FrameProcess 兜底 → 回退上一帧
+	void InterPointUpdate(ImgData& data);         // 两个点各自校验：越界/norm>20 跳变 → 全图 Hough 重检 → 回退上一帧
 	bool findHoughIntersections(ImgData& data);   // 从 long_lines 中求两组直线的交点
 	void Reset();  // 重置首帧和 ROI 状态，用于重新加载视频
 

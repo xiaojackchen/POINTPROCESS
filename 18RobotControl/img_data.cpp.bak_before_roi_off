@@ -1,0 +1,70 @@
+#include "img_data.h"
+#include <algorithm>
+#include <cmath>
+
+ImgData::ImgData() {};
+ImgData::~ImgData() {};
+
+void ImgData::clear(){
+	// ROI 只建立一次：第一次同时检出两个交点之后的那一帧，按原方法（两个交点 x 各 ±100、
+	// 纵向全高）取条带并锁定；锁定后每帧沿用，不再重算。未锁定前整幅图当 ROI。
+	if (!inputcolor.empty()) {
+		if (roi_locked) {
+			// 已锁定：roi_region 保持不动
+		}
+		else if (current_interPoint.size() >= 2) {
+			double left = current_interPoint.front().x - 100.0;
+			double right = current_interPoint.front().x + 100.0;
+			for (size_t i = 1; i < current_interPoint.size(); ++i) {
+				left = std::min(left, current_interPoint[i].x - 100.0);
+				right = std::max(right, current_interPoint[i].x + 100.0);
+			}
+
+			int roi_left = std::max(0, (int)std::floor(left));
+			int roi_right = std::min(inputcolor.cols, (int)std::ceil(right));
+			if (roi_right <= roi_left) roi_right = std::min(inputcolor.cols, roi_left + 1);
+			int roi_width = roi_right - roi_left;
+			if (roi_width < 1) roi_width = 1;
+
+			roi_region.clear();
+			roi_region.push_back(cv::Rect(roi_left, 0, roi_width, inputcolor.rows));
+			roi_locked = true;   // 就此固定，后面不再跟着交点移动
+			cout << "ROI 已锁定: x范围 [" << roi_left << ", " << roi_left + roi_width
+				<< "]  y范围 [0, " << inputcolor.rows << "]" << endl;
+		}
+		else {
+			// 还没同时检出两个交点：整幅图当 ROI，继续全图检测直到两个点都出现
+			roi_region.clear();
+			roi_region.push_back(cv::Rect(0, 0, inputcolor.cols, inputcolor.rows));
+		}
+	}
+	/*roi_region.clear();*/
+
+    inputcolor = cv::Mat();
+    
+    binary = cv::Mat();
+    bilFilt_img = cv::Mat();
+    input2 = cv::Mat();
+    skeleton = cv::Mat();
+    global_skeleton = cv::Mat();
+    input_roicolor = cv::Mat();
+    vertical_line = cv::Vec4i();
+    incline_line = cv::Vec4i();
+    lineEquation_vertical = LineEquation();
+    lineEquation_incline = LineEquation();
+    vertical_line2 = cv::Vec4i();
+    incline_line2 = cv::Vec4i();
+    lineEquation_vertical2 = LineEquation();
+    lineEquation_incline2 = LineEquation();
+    intersection2 = cv::Point2d();
+    upper_line = cv::Vec4f();
+    lower_line = cv::Vec4f();
+    intersection = cv::Point2d();
+    long_lines.clear();
+    upper_mask = cv::Mat();
+    lower_mask = cv::Mat();
+    upper_roi = cv::Mat();
+    lower_roi = cv::Mat();
+    final_lines1.clear();
+    final_lines2.clear();
+}

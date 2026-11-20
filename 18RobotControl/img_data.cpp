@@ -6,15 +6,35 @@ ImgData::ImgData() {};
 ImgData::~ImgData() {};
 
 void ImgData::clear(){
-	// 固定 ROI：手工标定的一块区域，x 范围 [241, 949]，y 范围 [0, 720]
-	// 超出画面的部分自动裁掉，保证后续 inputcolor(rect)、copyTo(rect) 都不越界
+	// ROI 只建立一次：第一次同时检出两个交点之后的那一帧，按原方法（两个交点 x 各 ±100、
+	// 纵向全高）取条带并锁定；锁定后每帧沿用，不再重算。未锁定时 ROI 关闭，整图正常处理。
 	if (!inputcolor.empty()) {
-		static const cv::Rect kFixedRoi(241, 0, 949 - 241, 720);
-		const cv::Rect rrFixed = kFixedRoi & cv::Rect(0, 0, inputcolor.cols, inputcolor.rows);
-		if (rrFixed.width > 0 && rrFixed.height > 0) {
-			// 固定 ROI 每帧只留一条，避免累积同一条框造成重复绘制、重复打印
+		if (roi_locked) {
+			// 已锁定：roi_region 保持不动
+		}
+		else if (current_interPoint.size() >= 2) {
+			double left = current_interPoint.front().x - 100.0;
+			double right = current_interPoint.front().x + 100.0;
+			for (size_t i = 1; i < current_interPoint.size(); ++i) {
+				left = std::min(left, current_interPoint[i].x - 100.0);
+				right = std::max(right, current_interPoint[i].x + 100.0);
+			}
+
+			int roi_left = std::max(0, (int)std::floor(left));
+			int roi_right = std::min(inputcolor.cols, (int)std::ceil(right));
+			if (roi_right <= roi_left) roi_right = std::min(inputcolor.cols, roi_left + 1);
+			int roi_width = roi_right - roi_left;
+			if (roi_width < 1) roi_width = 1;
+
 			roi_region.clear();
-			roi_region.push_back(rrFixed);
+			roi_region.push_back(cv::Rect(roi_left, 0, roi_width, inputcolor.rows));
+			roi_locked = true;   // 就此固定，后面不再跟着交点移动
+			cout << "ROI 已锁定: x范围 [" << roi_left << ", " << roi_left + roi_width
+				<< "]  y范围 [0, " << inputcolor.rows << "]" << endl;
+		}
+		else {
+			// 还没同时检出两个交点：ROI 关闭（空），roiProcess 里按整图正常处理
+			roi_region.clear();
 		}
 	}
 	/*roi_region.clear();*/

@@ -607,7 +607,7 @@ bool captureFrameWithDistance(cv::VideoCapture& cap, int frameCount, double dist
 // P1：-86 度与 75 度直线的交点；P2：86 度与 -75 度直线的交点
 static void DrawVideoOverlay(cv::Mat& img, const ImgData& data)
 {
-	// 固定 ROI：ImgData::clear() 每帧只放一条，这里画出并标注它的坐标
+	// ROI：未锁定时是整幅图，两个交点都检出后由 ImgData::clear() 锁定成条带，这里画出并标注
 	for (size_t i = 0; i < data.roi_region.size(); ++i) {
 		const cv::Rect rr = data.roi_region[i];
 		const bool isCurrent = (i + 1 == data.roi_region.size());
@@ -615,10 +615,12 @@ static void DrawVideoOverlay(cv::Mat& img, const ImgData& data)
 		// 把本帧真正画在图像上的 ROI 打到日志（坐标口径与 createRoiMasks 一致）
 		std::cout << "显示ROI" << (isCurrent ? "(当前帧)" : "(上一帧)")
 			<< ": x范围 [" << rr.x << ", " << rr.x + rr.width << "]"
-			<< "  y范围 [" << rr.y << ", " << rr.y + rr.height << "]" << std::endl;
+			<< "  y范围 [" << rr.y << ", " << rr.y + rr.height << "]"
+			<< (data.roi_locked ? "  已锁定" : "  未锁定(整图)") << std::endl;
 		if (isCurrent) {
 			char roiText[64];
-			std::snprintf(roiText, sizeof(roiText), "ROI x=%d w=%d", rr.x, rr.width);
+			std::snprintf(roiText, sizeof(roiText), "ROI x=%d w=%d%s", rr.x, rr.width,
+				data.roi_locked ? "" : " (未锁定)");
 			const int tx = (rr.x > 0 ? rr.x : 0) + 4;
 			cv::putText(img, roiText, cv::Point(tx, 16), cv::FONT_HERSHEY_SIMPLEX,
 				0.45, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
@@ -853,7 +855,7 @@ void CPage1Dlg::OnBnClickedButton8()
 	cap.set(cv::CAP_PROP_FPS, 30);
 	Sleep(3000);
 	Xcount = 0;
-	SetTimer(4, 500, nullptr);  // 第一个参数是定时器 ID，第二个参数是间隔时间（毫秒）
+	SetTimer(4, 200, nullptr);  // 第一个参数是定时器 ID，第二个参数是间隔时间（毫秒）
 	//UpdateData(FALSE);
 }
 
@@ -1588,7 +1590,7 @@ void CPage1Dlg::OnBnClickedButton21()
 	g_videoTask.Reset();
 
 	// 100 ms 定时器：每秒处理 10 帧
-	SetTimer(14, 500, nullptr);
+	SetTimer(14, 200, nullptr);
 }
 
 //水平滑块移动指定距离

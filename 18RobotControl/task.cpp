@@ -148,6 +148,24 @@ bool ImgTask::FrameProcess(ImgData& data)
     return data.current_interPoint.size() >= 2;   // 两个交点都检测到才算成功
 }
 
+// 全图 Hough 重检：跳变/越界的兜底。链路与首帧一致（整图预处理），
+// 但不碰 current_interPoint / previous_interPoint —— 这些由 InterPointUpdate 统一刷新。
+bool ImgTask::HoughRedetect(ImgData& data)
+{
+    if (data.inputcolor.empty()) {
+        cerr << "HoughRedetect: 图像为空" << endl;
+        return false;
+    }
+    img_lines lines;
+    ImgProcess process;
+    process.preprocessImage(data);            // 整图预处理，忽略 ROI 锁定
+    data.global_skeleton = data.skeleton;     // 整图骨架，覆盖锁定的 ROI 骨架
+    lines.detectLongLines(data.global_skeleton, data.inputcolor, data.long_lines, 30, 30, 100);
+    const bool ok = findHoughIntersections(data);
+    fillFinalLinesFromHough(data);
+    return ok;
+}
+
 // 后续帧：按上一帧两个交点算出的 ROI 做局部预处理，再对两个交点分别做 RANSAC 精修
 // 精修失败的那个点保留 Hough 结果，交给 InterPointUpdate 决定是否回退
 void ImgTask::roiProcess(ImgData& data)
@@ -156,17 +174,20 @@ void ImgTask::roiProcess(ImgData& data)
     img_lines lines;
     ImgProcess process;
 
-    // ROI 已固定为手工标定区域（全局唯一），不再依赖上一帧交点：只要有图就能精修
-    bool roi_ok = !data.roi_region.empty() && !data.inputcolor.empty();
-    if (roi_ok) {
-        const cv::Rect rr = data.roi_region.back();
-        roi_ok = rr.x >= 0 && rr.y >= 0 && rr.width > 0 && rr.height > 0 &&
-                 rr.x + rr.width  <= data.inputcolor.cols &&
-                 rr.y + rr.height <= data.inputcolor.rows;
-    }
-    if (!roi_ok) {
-        cout << "roiProcess: ROI 不可用, 本帧不做检测" << endl;
+    // ROI 只在锁定后使用；未锁定时 ROI 关闭，整图按正常流程处理（与首帧一致）
+    if (data.inputcolor.empty()) {
+        cout << "roiProcess: 无图像, 本帧不做检测" << endl;
         return;
+    }
+    const bool use_roi = !data.roi_region.empty();
+    if (use_roi) {
+        const cv::Rect rr = data.roi_region.back();
+        if (rr.x < 0 || rr.y < 0 || rr.width <= 0 || rr.height <= 0 ||
+            rr.x + rr.width  > data.inputcolor.cols ||
+            rr.y + rr.height > data.inputcolor.rows) {
+            cout << "roiProcess: ROI 越界, 本帧不做检测" << endl;
+            return;
+        }
     }
 
     // 精修中心：上一帧生效的两个交点（索引固定对应 P1、P2）
@@ -178,10 +199,21 @@ void ImgTask::roiProcess(ImgData& data)
         centers[1] = data.current_interPoint[1];
     }
 
-    cout << "roi" << data.roi_region.back() << endl;
-    data.input_roicolor = data.inputcolor(data.roi_region.back());
-    process.roipreprocessImage(data);
-    lines.detectLongLines(data.global_skeleton, data.inputcolor, data.long_lines, 10, 10, 50);
+    if (use_roi) {
+        // 已锁定：只处理 ROI 条带
+        cout << "roi" << data.roi_region.back() << endl;
+        data.input_roicolor = data.inputcolor(data.roi_region.back());
+        process.roipreprocessImage(data);
+        lines.detectLongLines(data.global_skeleton, data.inputcolor, data.long_lines, 10, 10, 50);
+    }
+    else {
+        // 未锁定：ROI 关闭，整图正常预处理，检测参数与首帧 firstFrameProcess 保持一致
+        cout << "roiProcess: ROI 未锁定, 整图处理" << endl;
+        data.input_roicolor = data.inputcolor;
+        process.preprocessImage(data);
+        data.global_skeleton = data.skeleton;
+        lines.detectLongLines(data.global_skeleton, data.inputcolor, data.long_lines, 30, 30, 100);
+    }
     findHoughIntersections(data);   // 先拿到本帧两个 Hough 交点，精修失败时就沿用它
     fillFinalLinesFromHough(data);  // 先按 Hough 填, 精修成功的点下面再覆盖
 
@@ -231,8 +263,8 @@ void ImgTask::roiProcess(ImgData& data)
     }
 }
 
-// 两个交点各自检查：越界或跳变过大时先用整帧 Hough 兜底，仍不行就回退该点上一帧的值
-// 原单点版本的判断（越界 / norm>20 / FrameProcess 兜底 / 回退上一帧），改成对两个点各做一遍
+// 两个交点各自检查：越界或 norm>20 跳变时先做一次全图 Hough 重检，仍无效就回退该点上一帧的值
+// 原单点版本的判断（越界 / norm>20 / 兜底 / 回退上一帧），改成对两个点各做一遍；兜底改为不受 ROI 限制的全图重检
 void ImgTask::InterPointUpdate(ImgData& data)
 {
     if (data.inputcolor.empty()) {
@@ -255,12 +287,19 @@ void ImgTask::InterPointUpdate(ImgData& data)
         }
     }
 
-    // 2. 整帧 Hough 重新检测一次（对应原代码里的 FrameProcess 兜底）
-    if (need_hough && !data.global_skeleton.empty()) {
-        cout << "交点异常, 改用整帧 Hough 重新检测" << endl;
-        FrameProcess(data);
+    // 2. 跳变/越界：全图 Hough 重新检测一次（不看 ROI，避免重检被条带限制住）
+    if (need_hough) {
+        cout << "交点跳变/越界, 改用全图 Hough 重新检测" << endl;
+        HoughRedetect(data);
         pts[0] = data.intersection;
         pts[1] = data.intersection2;
+        // 重检后仍然跳变也照常采用（目标快速移动时硬拦会把点卡死在上一帧）
+        for (int k = 0; k < 2; ++k) {
+            if (isPointValid(pts[k], data.inputcolor) && isPointValid(last[k], data.inputcolor)
+                && norm(pts[k] - last[k]) > 20.0) {
+                cout << "第" << (k + 1) << "个交点重检后仍跳变: " << norm(pts[k] - last[k]) << " (仍采用)" << endl;
+            }
+        }
     }
 
     // 3. Hough 兜底后仍无效的点，回退到它自己上一帧的值

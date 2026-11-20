@@ -21,6 +21,8 @@ public:
     // img_process.h的成员变量
     cv::Mat inputcolor, gray, binary, equalized, bilFilt_img, input2, skeleton, global_skeleton, input_roicolor;
     vector<Rect> roi_region;
+    // ROI 是否已锁定：第一次同时检出两个交点后按两点位置建好条带就置 true，之后不再重算
+    bool roi_locked = false;
     // 最终与每个交点相关的两条直线，存 fitLine 形式 (vx, vy, x0, y0)：
     // 顺序固定 0 = 近垂直线、1 = 斜线；精修成功时存拟合结果，否则存 Hough 结果；
     // 方向为零表示该线本帧没检测到，绘制时跳过
